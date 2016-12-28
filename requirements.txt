@@ -1,9 +1,0 @@
-cycler==0.10.0
-matplotlib==1.5.3
-numpy==1.11.2
-pybind11==1.8.1
-pyparsing==2.1.10
-python-dateutil==2.6.0
-python-example==0.0.1
-pytz==2016.7
-six==1.10.0
