@@ -18,7 +18,7 @@ Capture 5 seconds of raw data from the camera to a `file object` and `BytesIO` s
 import xevacam.camera as camera
 import io
 # Specify Xeneth calibration file if any
-cam = camera.XevaCam(calibration='C:\\calibration_file.xca'.encode('utf-8'))
+cam = camera.XevaCam(calibration='C:\\calibration_file.xca')
 # Specify stream objects to which camera writes its output
 file_stream = open('myfile.bin', 'wb')
 bytes_stream = io.BytesIO()
@@ -41,7 +41,7 @@ with cam.open() as c:
 ```python
 import xevacam.camera as camera
 import xevacam.utils as utils
-cam = camera.XevaCam(calibration='C:\\calibration_file.xca'.encode('utf-8'))
+cam = camera.XevaCam(calibration='C:\\calibration_file.xca')
 # Open connection to camera
 with cam.open() as c:
 	# Create a window and connect it to the camera output
