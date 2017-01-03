@@ -8,6 +8,8 @@ The motivation for this software was the hyperspectral camera which captures lig
 
 Only Windows 64 bit compatibility is tested with Xeneth v2.6. See section 'Installation' for required dependencies.
 
+![alt tag](https://dl.dropboxusercontent.com/u/39458993/github/xevacam/images/xeva196_1_mod.jpg)
+
 ## Code Example:
 
 ### Video capture to a file and stream
