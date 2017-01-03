@@ -18,14 +18,14 @@ Capture 5 seconds of raw data from the camera to a `file object` and `BytesIO` s
 import xevacam.camera as camera
 import io
 # Specify Xeneth calibration file if any
-cam = camera.XevaCam(calibration='C:\\calibration_file.xca'.encode('utf-8'))
+cam = camera.XevaCam(calibration='C:\\calibration_file.xca')
 # Specify stream objects to which camera writes its output
 file_stream = open('myfile.bin', 'wb')
 bytes_stream = io.BytesIO()
 cam.set_handler(file_stream)
 cam.set_handler(bytes_stream)
 # Open connection to camera
-with cam.open() as c:
+with cam.opened() as c:
     c.start_recording()
     c.wait_recording(5)  # Record for 5 seconds
     meta = c.stop_recording()  # Return metadata about the clip
@@ -41,9 +41,9 @@ with cam.open() as c:
 ```python
 import xevacam.camera as camera
 import xevacam.utils as utils
-cam = camera.XevaCam(calibration='C:\\calibration_file.xca'.encode('utf-8'))
+cam = camera.XevaCam(calibration='C:\\calibration_file.xca')
 # Open connection to camera
-with cam.open() as c:
+with cam.opened() as c:
 	# Create a window and connect it to the camera output
 	# Line scanner view. Show 30th line in the frame (30th band in data cube)  
     window = utils.LineScanWindow(cam, 30)

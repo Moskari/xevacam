@@ -6,12 +6,21 @@ Created on 9.11.2016
 
 import numpy as np
 import xevacam.xevadll as xdll
-# from xevacam.xevadll import XDLL, error2str, print_error
 from contextlib import contextmanager
 import threading
+import queue
+import sys
 import time
 import xevacam.utils as utils
 from xevacam.utils import kbinterrupt_decorate
+
+'''
+class ExceptionThread(threading.Thread):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(self, *args, **kwargs)
+        self.exc_queue = queue.Queue()
+'''
 
 
 class XevaCam(object):
@@ -23,16 +32,32 @@ class XevaCam(object):
         @param calibration: Bytes string path to the calibration file (.xca)
         '''
         self.handle = 0
-        # self.lines = []
+        self.calibration = calibration.encode('utf-8')  # Path to .xca file
+
+        # Involve threading
         self._enabled = False
         self.enabled_lock = threading.Lock()
-        self.handlers = []  # For storing, streaming etc the data
-        self.calibration = calibration.encode('utf-8')  # Path to .xca file
+        self.handlers = []  # For streams, objects with write() method
+        # Exception queue for checking if an exception occurred inside thread
+        self.exc_queue = queue.Queue()
         self._capture_thread = threading.Thread(name='capture_thread',
                                                 target=self.capture_frame_stream)
                                         # args=(self.handlers))
 
     @contextmanager
+    def opened(self, camera_path='cam://0', sw_correction=True):
+        '''
+        Context manager for open(). Opens connection to the camera and closes it in controlled fashion when
+        exiting the context.
+
+        @param camera_path: String path to the camera. Default is 'cam://0'
+        @param sw_correction: Use previously defined calibration file (.xca)
+        '''
+        try:
+            yield self.open(camera_path, sw_correction)
+        finally:
+            self.close()
+
     def open(self, camera_path='cam://0', sw_correction=True):
         '''
         Opens connection to the camera and closes it in controlled fashion when
@@ -41,31 +66,28 @@ class XevaCam(object):
         @param camera_path: String path to the camera. Default is 'cam://0'
         @param sw_correction: Use previously defined calibration file (.xca)
         '''
-        try:
-            self.handle = \
-                xdll.XDLL.open_camera(camera_path.encode('utf-8'), 0, 0)
-            print('XCHANDLE:', self.handle)
-            if self.handle == 0:
-                raise Exception('Handle is NULL')
-            if not xdll.XDLL.is_initialised(self.handle):
-                raise Exception('Initialization failed.')
-            if self.calibration:
-                if sw_correction:
-                    flag = xdll.XDLL.XLC_StartSoftwareCorrection
-                else:
-                    flag = 0
-                error = xdll.XDLL.load_calibration(self.handle,
-                                                   self.calibration,
-                                                   flag)
-                if error != xdll.XDLL.I_OK:
-                    msg = 'Could\'t load' + \
-                        'calibration file ' + \
-                        str(self.calibration) + \
-                        xdll.error2str(error)
-                    raise Exception(msg)
-            yield self
-        finally:
-            self.close()
+        self.handle = \
+            xdll.XDLL.open_camera(camera_path.encode('utf-8'), 0, 0)
+        print('XCHANDLE:', self.handle)
+        if self.handle == 0:
+            raise Exception('Handle is NULL')
+        if not xdll.XDLL.is_initialised(self.handle):
+            raise Exception('Initialization failed.')
+        if self.calibration:
+            if sw_correction:
+                flag = xdll.XDLL.XLC_StartSoftwareCorrection
+            else:
+                flag = 0
+            error = xdll.XDLL.load_calibration(self.handle,
+                                               self.calibration,
+                                               flag)
+            if error != xdll.XDLL.I_OK:
+                msg = 'Could\'t load' + \
+                    'calibration file ' + \
+                    str(self.calibration) + \
+                    xdll.error2str(error)
+                raise Exception(msg)
+        return self
 
     def close(self):
         '''
@@ -108,6 +130,9 @@ class XevaCam(object):
         '''
         with self.enabled_lock:
             self._enabled = value
+
+    def is_alive(self):
+        return self._capture_thread.isAlive()
 
     def get_frame_size(self):
         '''
@@ -196,21 +221,51 @@ class XevaCam(object):
         '''
         self.handlers.append(handler)
 
+    def clear_handlers(self):
+        name = 'clear_handlers'
+        if not self.is_alive():
+            self.handlers.clear()
+            print(name, 'Cleared handlers')
+        else:
+            raise Exception('Can\'t clear handlers when thread is alive')
+
+    def check_thread_exceptions(self):
+        name = 'check_thread_exceptions'
+        try:
+            exc = self.exc_queue.get(block=False)
+        except queue.Empty:
+            pass  # No exceptions
+        else:
+            exc_type, exc_obj, exc_trace = exc
+            print(name, '%s: %s' % (str(exc_type), str(exc_trace)))
+            raise exc
+
     @kbinterrupt_decorate
     def start_recording(self):
         '''
         Starts recording frames to handlers.
         '''
         self.enabled = True
+        self._capture_thread = threading.Thread(name='capture_thread',
+                                                target=self.capture_frame_stream)
         self._capture_thread.start()
 
     @kbinterrupt_decorate
     def wait_recording(self, seconds):
         '''
-        Blocks execution.
+        Blocks execution and checks there are no exceptions.
         @param seconds: Time how long the function blocks the execution.
         '''
-        time.sleep(seconds)
+        # self.record_time
+        start = time.time()
+        while True:
+            self.check_thread_exceptions()  # Raises exception
+            end = time.time()
+            t = end-start
+            if end-start >= seconds:
+                break
+        self._record_time = t
+        # time.sleep(seconds)
 
     @kbinterrupt_decorate
     def stop_recording(self):
@@ -218,15 +273,20 @@ class XevaCam(object):
         Stops capturing frames after the latest one is done capturing.
         @return: Metadata tuple array
         '''
+        start = time.time()
         self.enabled = False
         self._capture_thread.join(5)
         if self._capture_thread.isAlive():
             raise Exception('Thread didn\'t stop.')
+        end = time.time()
+        self._record_time += end-start
         error = xdll.XDLL.stop_capture(self.handle)
         if error != xdll.XDLL.I_OK:
             xdll.print_error(error)
             raise Exception(
                 'Could not stop capturing. %s' % xdll.error2str(error))
+        self.check_thread_exceptions()  # Raises exception
+
         # Return ENVI metadata about the recording
         frame_dims = self.get_frame_dims()
         frame_type = self.get_frame_type()
@@ -237,7 +297,8 @@ class XevaCam(object):
                  utils.datatype2envitype(
                      'u' + str(xdll.XDLL.pixel_sizes[frame_type]))),
                 ('interleave', 'bil'),
-                ('byte order', 1))
+                ('byte order', 1),
+                ('description', 'Capture time = %d' % self._record_time))
         return meta
 
     def capture_frame_stream(self):
@@ -246,54 +307,58 @@ class XevaCam(object):
         Keeps running until 'enabled' property is set to False.
         '''
         name = 'capture_frame_stream'
-        error = xdll.XDLL.start_capture(self.handle)
-        if error != xdll.XDLL.I_OK:
-            xdll.print_error(error)
-            raise Exception(
-                '%s Starting capture failed! %s' % (name, xdll.error2str(error)))
-        if xdll.XDLL.is_capturing(self.handle) == 0:
-            for i in range(5):
-                if xdll.XDLL.is_capturing(self.handle) == 0:
-                    print(name, 'Camera is not capturing. Retry number %d' % i)
-                    time.sleep(0.1)
-                else:
-                    break
-        if xdll.XDLL.is_capturing(self.handle) == 0:
-            raise Exception('Camera is not capturing.')
-        elif xdll.XDLL.is_capturing(self.handle):
-            self.frames_count = 0
-            size = self.get_frame_size()
-            dims = self.get_frame_dims()
-            frame_t = self.get_frame_type()
-            # pixel_size = self.get_pixel_size()
-            print(name, 'Size:', size, 'Dims:', dims, 'Frame type:', frame_t)
-            frame_buffer = bytes(size)
-            while self._enabled:
-                # frame_buffer = \
-                #     np.zeros((size / pixel_size,),
-                #              dtype=np.int16)
-                # buffer = memoryview(frame_buffer)
-                while True:
-                    ok = self.get_frame(frame_buffer,
-                                        frame_t=frame_t,
-                                        size=size,
-                                        flag=0)  # Non-blocking
-                    # xdll.XGF_Blocking
-                    if ok:
-                        for h in self.handlers:
-                            print(name,
-                                  'Writing to %s' % str(h.__class__.__name__))
-                            wrote_bytes = h.write(frame_buffer)
-                            print(name,
-                                  'Wrote to %s:' % str(h.__class__.__name__),
-                                  wrote_bytes,
-                                  'bytes')
+        try:
+            error = xdll.XDLL.start_capture(self.handle)
+            if error != xdll.XDLL.I_OK:
+                xdll.print_error(error)
+                raise Exception(
+                    '%s Starting capture failed! %s' % (name, xdll.error2str(error)))
+            if xdll.XDLL.is_capturing(self.handle) == 0:
+                for i in range(5):
+                    if xdll.XDLL.is_capturing(self.handle) == 0:
+                        print(name, 'Camera is not capturing. Retry number %d' % i)
+                        time.sleep(0.1)
+                    else:
                         break
-                    # else:
-                    #     print(name, 'Missed frame', i)
-                self.frames_count += 1
-        else:
-            raise Exception('Camera is not capturing.')
+            if xdll.XDLL.is_capturing(self.handle) == 0:
+                raise Exception('Camera is not capturing.')
+            elif xdll.XDLL.is_capturing(self.handle):
+                self.frames_count = 0
+                size = self.get_frame_size()
+                dims = self.get_frame_dims()
+                frame_t = self.get_frame_type()
+                # pixel_size = self.get_pixel_size()
+                print(name, 'Size:', size, 'Dims:', dims, 'Frame type:', frame_t)
+                frame_buffer = bytes(size)
+                while self._enabled:
+                    # frame_buffer = \
+                    #     np.zeros((size / pixel_size,),
+                    #              dtype=np.int16)
+                    # buffer = memoryview(frame_buffer)
+                    while True:
+                        ok = self.get_frame(frame_buffer,
+                                            frame_t=frame_t,
+                                            size=size,
+                                            flag=0)  # Non-blocking
+                        # xdll.XGF_Blocking
+                        if ok:
+                            for h in self.handlers:
+                                print(name,
+                                      'Writing to %s' % str(h.__class__.__name__))
+                                wrote_bytes = h.write(frame_buffer)
+                                print(name,
+                                      'Wrote to %s:' % str(h.__class__.__name__),
+                                      wrote_bytes,
+                                      'bytes')
+                            break
+                        # else:
+                        #     print(name, 'Missed frame', i)
+                    self.frames_count += 1
+            else:
+                raise Exception('Camera is not capturing.')
+        except Exception as e:
+            self.exc_queue.put(sys.exc_info())
+            print(name, '%s(%s): %s' % (type(e).__name__, str(e.errno), e.strerror))
         print(name, 'Thread closed')
 
     def capture_single_frame(self):
@@ -342,6 +407,7 @@ class XevaCam(object):
         return frame, size, dims, frame_t
 
 
+"""
 class XevaImage(object):
 
     def __init__(self, byte_stream, dims, dtype):
@@ -366,3 +432,4 @@ class XevaImage(object):
         # data = np.transpose(data, trans)
         # return data
         return 0
+"""

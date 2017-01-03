@@ -37,7 +37,7 @@ if __name__ == '__main__':
     cam.set_handler(file_stream)
     # cam.set_handler(bytes_stream)
     # cam.set_handler(preview_stream)
-    with cam.open(sw_correction=True) as c:
+    with cam.opened(sw_correction=True) as c:
         window = utils.LineScanWindow(cam, 30)
         c.start_recording()
         window.show()
