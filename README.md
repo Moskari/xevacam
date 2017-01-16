@@ -38,6 +38,8 @@ with cam.opened() as c:
 
 ### Experimental video feed with Matplotlib
 
+![alt tag](https://dl.dropboxusercontent.com/u/39458993/github/xevacam/images/linescanwindow.png)
+
 `xevacam.utils` includes window classes for showing a real-time video feed. At the moment a window is opened in its own thread which is not especially Matplotlib compatible and ends in a run-time exception when window closes (Matplotlib mandates that the plot window has to run in the main thread).
 
 ```python
