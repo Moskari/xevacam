@@ -11,6 +11,7 @@ import threading
 import queue
 import sys
 import time
+import struct
 import xevacam.utils as utils
 from xevacam.utils import kbinterrupt_decorate
 
@@ -43,6 +44,8 @@ class XevaCam(object):
         self._capture_thread = threading.Thread(name='capture_thread',
                                                 target=self.capture_frame_stream)
                                         # args=(self.handlers))
+        self._record_time = 0  # Used for measuring the overall recording time
+        self._times = []  # Used for saving time stamps for each frame
 
     @contextmanager
     def opened(self, camera_path='cam://0', sw_correction=True):
@@ -212,14 +215,14 @@ class XevaCam(object):
         # frame_buffer = np.reshape(frame_buffer, frame_dims)
         return error == xdll.XDLL.I_OK  # , frame_buffer
 
-    def set_handler(self, handler):
+    def set_handler(self, handler, incl_ctrl_frames=False):
         '''
         Adds a new output to which frames are written.
 
         @param handler: a file-like object, a stream or object with write()
                         and read() methods.
         '''
-        self.handlers.append(handler)
+        self.handlers.append((handler, incl_ctrl_frames))
 
     def clear_handlers(self):
         name = 'clear_handlers'
@@ -264,7 +267,7 @@ class XevaCam(object):
             t = end-start
             if end-start >= seconds:
                 break
-        self._record_time = t
+        self._record_time += t
         # time.sleep(seconds)
 
     @kbinterrupt_decorate
@@ -298,7 +301,7 @@ class XevaCam(object):
                      'u' + str(xdll.XDLL.pixel_sizes[frame_type]))),
                 ('interleave', 'bil'),
                 ('byte order', 1),
-                ('description', 'Capture time = %d' % self._record_time))
+                ('description', 'Capture time = %d\nFrame time stamps = %s' % (self._record_time, str(self._times))))
         return meta
 
     def capture_frame_stream(self):
@@ -330,6 +333,8 @@ class XevaCam(object):
                 # pixel_size = self.get_pixel_size()
                 print(name, 'Size:', size, 'Dims:', dims, 'Frame type:', frame_t)
                 frame_buffer = bytes(size)
+                # ctrl_frame_buffer = bytearray(4)  # 32 bits
+                start_time = utils.get_time()
                 while self._enabled:
                     # frame_buffer = \
                     #     np.zeros((size / pixel_size,),
@@ -342,14 +347,19 @@ class XevaCam(object):
                                             flag=0)  # Non-blocking
                         # xdll.XGF_Blocking
                         if ok:
-                            for h in self.handlers:
-                                print(name,
-                                      'Writing to %s' % str(h.__class__.__name__))
+                            curr_time = utils.get_time() - start_time
+                            self._times.append(curr_time)
+                            ctrl_frame_buffer = struct.pack('I', curr_time)  # 4 bytes
+                            for h, incl_ctrl_frame in self.handlers:
+                                # print(name,
+                                #       'Writing to %s' % str(h.__class__.__name__))
+                                if incl_ctrl_frame:
+                                    h.write(ctrl_frame_buffer)
                                 wrote_bytes = h.write(frame_buffer)
-                                print(name,
-                                      'Wrote to %s:' % str(h.__class__.__name__),
-                                      wrote_bytes,
-                                      'bytes')
+                                # print(name,
+                                #       'Wrote to %s:' % str(h.__class__.__name__),
+                                #       wrote_bytes,
+                                #       'bytes')
                             break
                         # else:
                         #     print(name, 'Missed frame', i)
@@ -388,7 +398,6 @@ class XevaCam(object):
             # pixel_size = self.get_pixel_size()
             print(name, 'Size:', size, 'Dims:', dims, 'Frame type:', frame_t)
             frame_buffer = bytes(size)
-
             while True:
                 ok = self.get_frame(frame_buffer,
                                     frame_t=frame_t,

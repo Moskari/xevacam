@@ -11,6 +11,7 @@ import pylab
 import numpy as np
 import xevacam.streams as streams
 import threading
+import time
 
 def datatype2envitype(datatype):
     DATATYPES = {'u1': 1,
@@ -200,3 +201,7 @@ def kbinterrupt_decorate(func):
             this.close()
             raise
     return func_wrapper
+
+def get_time():
+    return int(round(time.time()*1000))
+
