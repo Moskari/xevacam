@@ -8,7 +8,7 @@ The motivation for this software was the hyperspectral camera which captures lig
 
 Only Windows 64 bit compatibility is tested with Xeneth v2.6. See section 'Installation' for required dependencies.
 
-![alt tag](https://dl.dropboxusercontent.com/u/39458993/github/xevacam/images/xeva196_1_mod.jpg)
+![alt tag](https://www.dropbox.com/s/p86j7ud572ctdbg/xeva196_1_mod.jpg?dl=1)
 
 
 ## Code Example:
@@ -38,6 +38,8 @@ with cam.opened() as c:
 ```
 
 ### Experimental video feed with Matplotlib
+
+![alt tag](https://www.dropbox.com/s/xzcohexqamt59ou/linescanwindow.png?dl=1)
 
 `xevacam.utils` includes window classes for showing a real-time video feed. At the moment a window is opened in its own thread which is not especially Matplotlib compatible and ends in a run-time exception when window closes (Matplotlib mandates that the plot window has to run in the main thread).
 
